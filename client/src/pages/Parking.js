@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import ParkingMap from '../components/ParkingMap';
 import styled from 'styled-components';
 import { 
   FaParking, 
@@ -251,7 +252,7 @@ const Loading = styled.div`
   font-size: 18px;
 `;
 
-const Error = styled.div`
+const ErrorDiv = styled.div`
   background: #f8d7da;
   color: #721c24;
   padding: 15px;
@@ -260,6 +261,15 @@ const Error = styled.div`
 `;
 
 function Parking() {
+  // 검색 버튼 및 Enter 키 이벤트 핸들러
+  // 검색 버튼 및 Enter 키 이벤트 핸들러
+  const handleSearch = () => {
+    fetchParkingData({ ...filters, keyword: searchKeyword });
+    setShowList(true);
+  };
+  // 어떤 카드가 열려있는지 id로 관리
+  const [openCardId, setOpenCardId] = useState(null);
+  const [showList, setShowList] = useState(false);
   const [parkingData, setParkingData] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -273,7 +283,6 @@ function Parking() {
   const [searchKeyword, setSearchKeyword] = useState('');
 
   useEffect(() => {
-    fetchParkingData();
     fetchStats();
   }, []);
 
@@ -319,44 +328,13 @@ function Parking() {
     const newFilters = { ...filters, [filterType]: value };
     setFilters(newFilters);
     fetchParkingData(newFilters);
-  };
-
-  const handleSearch = async () => {
-    if (!searchKeyword.trim()) return;
-    
-    try {
-      setLoading(true);
-      const response = await fetch(`/api/parking/search/${encodeURIComponent(searchKeyword)}`);
-      const data = await response.json();
-      
-      if (data.success) {
-        setParkingData(data.data);
-      } else {
-        throw new Error(data.error || '검색 결과를 찾을 수 없습니다.');
-      }
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (loading && !parkingData.length) {
-    return (
-      <ParkingContainer>
-        <PageTitle>강원도 주차장 정보</PageTitle>
-        <Loading>주차장 정보를 불러오는 중...</Loading>
-      </ParkingContainer>
-    );
   }
 
   return (
     <ParkingContainer>
       <PageTitle>강원도 주차장 정보</PageTitle>
-      
       <SearchSection>
         <SearchTitle>주차장 검색 및 필터</SearchTitle>
-        
         <FilterContainer>
           <FilterSelect
             value={filters.city}
@@ -369,7 +347,6 @@ function Parking() {
             <option value="속초">속초</option>
             <option value="동해">동해</option>
           </FilterSelect>
-          
           <FilterSelect
             value={filters.type}
             onChange={(e) => handleFilterChange('type', e.target.value)}
@@ -378,7 +355,6 @@ function Parking() {
             <option value="공영">공영</option>
             <option value="민영">민영</option>
           </FilterSelect>
-          
           <FilterSelect
             value={filters.available}
             onChange={(e) => handleFilterChange('available', e.target.value)}
@@ -387,7 +363,6 @@ function Parking() {
             <option value="true">주차 가능</option>
           </FilterSelect>
         </FilterContainer>
-        
         <SearchContainer>
           <SearchInput
             type="text"
@@ -402,6 +377,72 @@ function Parking() {
           </SearchButton>
         </SearchContainer>
       </SearchSection>
+      {/* 지도와 에러 메시지 영역을 검색 결과 아래에 위치 */}
+      {error && <ErrorDiv>{error}</ErrorDiv>}
+      {/* 검색 후에만 리스트 렌더링 */}
+      {showList && parkingData.length > 0 && (
+        <ParkingGrid>
+          {parkingData.map((parking, idx) => (
+            <div key={parking.id || idx}>
+              <ParkingCard
+                style={{ cursor: 'pointer' }}
+                onClick={() => setOpenCardId(openCardId === idx ? null : idx)}
+              >
+                <ParkingHeader>
+                  <ParkingName>{parking.name}</ParkingName>
+                  <ParkingType>{parking.type}</ParkingType>
+                </ParkingHeader>
+                <ParkingAddress>
+                  <FaMapMarkerAlt />
+                  {parking.address}
+                </ParkingAddress>
+                <ParkingInfo>
+                  <InfoItem>
+                    <FaClock />
+                    {parking.operatingHours}
+                  </InfoItem>
+                  <InfoItem>
+                    <FaPhone />
+                    {parking.phone}
+                  </InfoItem>
+                  <InfoItem>
+                    <FaParking />
+                    {parking.fee}
+                  </InfoItem>
+                  <InfoItem>
+                    <FaInfoCircle />
+                    {parking.availableSpaces}/{parking.totalSpaces} 공간
+                  </InfoItem>
+                </ParkingInfo>
+                <AvailabilityBar>
+                  <AvailabilityFill
+                    available={parking.availableSpaces}
+                    total={parking.totalSpaces}
+                  />
+                </AvailabilityBar>
+                <AvailabilityText>
+                  {parking.availableSpaces}개 공간 사용 가능
+                </AvailabilityText>
+                <Amenities>
+                  {(parking.amenities || []).map((amenity, index) => (
+                    <Amenity key={index}>
+                      {amenity.includes('장애인') ? <FaWheelchair /> : null}
+                      {amenity.includes('전기차') ? <FaChargingStation /> : null}
+                      {amenity}
+                    </Amenity>
+                  ))}
+                </Amenities>
+              </ParkingCard>
+              {/* 카드가 열려있을 때만 지도 표시 */}
+              {openCardId === idx && (
+                <div style={{ margin: '20px 0' }}>
+                  <ParkingMap parkingData={[parking]} />
+                </div>
+              )}
+            </div>
+          ))}
+        </ParkingGrid>
+      )}
 
       {stats && (
         <StatsSection>
@@ -436,63 +477,7 @@ function Parking() {
         </StatsSection>
       )}
 
-      {error && <Error>{error}</Error>}
-
-      <ParkingGrid>
-        {parkingData.map((parking) => (
-          <ParkingCard key={parking.id}>
-            <ParkingHeader>
-              <ParkingName>{parking.name}</ParkingName>
-              <ParkingType>{parking.type}</ParkingType>
-            </ParkingHeader>
-            
-            <ParkingAddress>
-              <FaMapMarkerAlt />
-              {parking.address}
-            </ParkingAddress>
-            
-            <ParkingInfo>
-              <InfoItem>
-                <FaClock />
-                {parking.operatingHours}
-              </InfoItem>
-              <InfoItem>
-                <FaPhone />
-                {parking.phone}
-              </InfoItem>
-              <InfoItem>
-                <FaParking />
-                {parking.fee}
-              </InfoItem>
-              <InfoItem>
-                <FaInfoCircle />
-                {parking.availableSpaces}/{parking.totalSpaces} 공간
-              </InfoItem>
-            </ParkingInfo>
-            
-            <AvailabilityBar>
-              <AvailabilityFill
-                available={parking.availableSpaces}
-                total={parking.totalSpaces}
-              />
-            </AvailabilityBar>
-            <AvailabilityText>
-              {parking.availableSpaces}개 공간 사용 가능
-            </AvailabilityText>
-            
-            <Amenities>
-              {parking.amenities.map((amenity, index) => (
-                <Amenity key={index}>
-                  {amenity.includes('장애인') ? <FaWheelchair /> : null}
-                  {amenity.includes('전기차') ? <FaChargingStation /> : null}
-                  {amenity}
-                </Amenity>
-              ))}
-            </Amenities>
-          </ParkingCard>
-        ))}
-      </ParkingGrid>
-    </ParkingContainer>
+  </ParkingContainer>
   );
 }
 

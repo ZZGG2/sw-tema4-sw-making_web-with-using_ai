@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import ParkingMap from '../components/ParkingMap';
 import styled from 'styled-components';
 import { 
   FaPaw, 
@@ -338,6 +339,13 @@ function Pets() {
   const [placesData, setPlacesData] = useState([]);
   const [tipsData, setTipsData] = useState([]);
   const [stats, setStats] = useState(null);
+  // 동반 장소 지도 토글용
+  const [openPlaceIdx, setOpenPlaceIdx] = useState(null);
+  // 검색창 UX
+  const [showServicesList, setShowServicesList] = useState(false);
+  const [showPlacesList, setShowPlacesList] = useState(false);
+  const [servicesSearchKeyword, setServicesSearchKeyword] = useState('');
+  const [placesSearchKeyword, setPlacesSearchKeyword] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   
@@ -349,7 +357,6 @@ function Pets() {
 
   useEffect(() => {
     fetchServicesData();
-    fetchPlacesData();
     fetchTipsData();
     fetchStats();
   }, []);
@@ -358,14 +365,12 @@ function Pets() {
     try {
       setLoading(true);
       setError(null);
-      
       const queryParams = new URLSearchParams();
       if (params.type) queryParams.append('type', params.type);
       if (params.city) queryParams.append('city', params.city);
-      
       const response = await fetch(`/api/pets/services?${queryParams}`);
       const data = await response.json();
-      
+      console.log('servicesData:', data); // 데이터 구조 확인
       if (data.success) {
         setServicesData(data.data);
       } else {
@@ -381,11 +386,11 @@ function Pets() {
   const fetchPlacesData = async (params = {}) => {
     try {
       const queryParams = new URLSearchParams();
-      if (params.type) queryParams.append('type', params.type);
-      
+      if (params.keyword) queryParams.append('keyword', params.keyword);
+      // type, city 등 추가 필터 필요시 여기에
       const response = await fetch(`/api/pets/places?${queryParams}`);
       const data = await response.json();
-      
+      console.log('placesData:', data); // 데이터 구조 확인
       if (data.success) {
         setPlacesData(data.data);
       }
@@ -434,12 +439,12 @@ function Pets() {
   const handleTabChange = (tab) => {
     setActiveTab(tab);
     setFilters({ type: '', city: '' });
-    
-    if (tab === 'services') {
-      fetchServicesData();
-    } else if (tab === 'places') {
-      fetchPlacesData();
-    }
+    setShowServicesList(false);
+    setShowPlacesList(false);
+    setServicesSearchKeyword('');
+    setPlacesSearchKeyword('');
+    setServicesData([]);
+    setPlacesData([]);
   };
 
   const getServiceIcon = (type) => {
@@ -573,80 +578,143 @@ function Pets() {
       {error && <Error>{error}</Error>}
 
       {activeTab === 'services' && (
-        <ServicesGrid>
-          {servicesData.map((service) => (
-            <ServiceCard key={service.id}>
-              <ServiceHeader>
-                <ServiceIcon className={getServiceIconClass(service.type)}>
-                  {getServiceIcon(service.type)}
-                </ServiceIcon>
-                <ServiceName>{service.name}</ServiceName>
-                <ServiceType>{service.type}</ServiceType>
-              </ServiceHeader>
-              
-              <ServiceAddress>
-                <FaMapMarkerAlt />
-                {service.address}
-              </ServiceAddress>
-              
-              <ServiceInfo>
-                <InfoItem>
-                  <FaClock />
-                  {service.operatingHours}
-                </InfoItem>
-                <InfoItem>
-                  <FaPhone />
-                  {service.phone}
-                </InfoItem>
-              </ServiceInfo>
-              
-              <Services>
-                {service.services.map((serviceItem, index) => (
-                  <ServiceTag key={index}>{serviceItem}</ServiceTag>
-                ))}
-              </Services>
-              
-              <Rating>
-                <FaStar style={{ color: '#ffd700' }} />
-                {service.rating} ({service.reviews}개 리뷰)
-              </Rating>
-            </ServiceCard>
-          ))}
-        </ServicesGrid>
+        <div>
+          {/* 검색창만 먼저 노출 */}
+          <SearchSection>
+            <SearchTitle>반려동물 서비스 검색</SearchTitle>
+            <FilterContainer>
+              <SearchInput
+                type="text"
+                placeholder="서비스명, 주소, 지역명 등 입력"
+                value={servicesSearchKeyword}
+                onChange={e => setServicesSearchKeyword(e.target.value)}
+                onKeyPress={e => {
+                  if (e.key === 'Enter') {
+                    fetchServicesData({ keyword: servicesSearchKeyword });
+                    setShowServicesList(true);
+                  }
+                }}
+              />
+              <SearchButton
+                onClick={() => {
+                  fetchServicesData({ keyword: servicesSearchKeyword });
+                  setShowServicesList(true);
+                }}
+              >
+                <FaSearch /> 검색
+              </SearchButton>
+            </FilterContainer>
+          </SearchSection>
+          {/* 검색 후에만 리스트/카드/지도 노출 (카드 클릭 시 지도 토글) */}
+          {showServicesList && Array.isArray(servicesData) && servicesData.length > 0 && (
+            <ServicesGrid>
+              {servicesData.map((service, idx) => (
+                <div key={service.id || idx}>
+                  <ServiceCard
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => setOpenPlaceIdx(openPlaceIdx === idx ? null : idx)}
+                  >
+                    <ServiceHeader>
+                      <ServiceIcon className={getServiceIconClass(service.type)}>
+                        {getServiceIcon(service.type)}
+                      </ServiceIcon>
+                      <ServiceName>{service.name}</ServiceName>
+                      <ServiceType>{service.type}</ServiceType>
+                    </ServiceHeader>
+                    <ServiceAddress>
+                      <FaMapMarkerAlt />
+                      {service.address}
+                    </ServiceAddress>
+                    <ServiceInfo>
+                      <InfoItem>
+                        <FaClock />
+                        {service.operatingHours}
+                      </InfoItem>
+                      <InfoItem>
+                        <FaPhone />
+                        {service.phone}
+                      </InfoItem>
+                    </ServiceInfo>
+                  </ServiceCard>
+                  {openPlaceIdx === idx && service.lat && service.lon && (
+                    <div style={{ margin: '16px 0' }}>
+                      <ParkingMap parkingData={[{
+                        name: service.name,
+                        address: service.address,
+                        coordinates: { lat: service.lat, lon: service.lon }
+                      }]} />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </ServicesGrid>
+          )}
+        </div>
       )}
 
       {activeTab === 'places' && (
-        <ServicesGrid>
-          {placesData.map((place) => (
-            <ServiceCard key={place.id}>
-              <ServiceHeader>
-                <ServiceIcon className="park">
-                  <FaTree />
-                </ServiceIcon>
-                <ServiceName>{place.name}</ServiceName>
-                <ServiceType>{place.type}</ServiceType>
-              </ServiceHeader>
-              
-              <ServiceAddress>
-                <FaMapMarkerAlt />
-                {place.address}
-              </ServiceAddress>
-              
-              <TipContent>{place.description}</TipContent>
-              
-              <ServiceInfo>
-                <InfoItem>
-                  <FaPaw />
-                  정책: {place.petPolicy}
-                </InfoItem>
-                <InfoItem>
-                  <FaStar />
-                  평점: {place.rating}
-                </InfoItem>
-              </ServiceInfo>
-            </ServiceCard>
-          ))}
-        </ServicesGrid>
+        <div>
+          {/* 검색창만 먼저 노출 */}
+          <SearchSection>
+            <SearchTitle>반려동물 동반 장소 검색</SearchTitle>
+            <FilterContainer>
+              <SearchInput
+                type="text"
+                placeholder="장소명, 주소, 지역명 등 입력"
+                value={placesSearchKeyword}
+                onChange={e => setPlacesSearchKeyword(e.target.value)}
+                onKeyPress={e => {
+                  if (e.key === 'Enter') {
+                    fetchPlacesData({ keyword: placesSearchKeyword });
+                    setShowPlacesList(true);
+                  }
+                }}
+              />
+              <SearchButton
+                onClick={() => {
+                  fetchPlacesData({ keyword: placesSearchKeyword });
+                  setShowPlacesList(true);
+                }}
+              >
+                <FaSearch /> 검색
+              </SearchButton>
+            </FilterContainer>
+          </SearchSection>
+          {/* 검색 후에만 리스트/카드/지도 노출 (카드 클릭 시 지도 토글) */}
+          {showPlacesList && Array.isArray(placesData) && placesData.length > 0 && (
+            <ServicesGrid>
+              {placesData.map((place, idx) => (
+                <div key={place.id || idx}>
+                  <ServiceCard
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => setOpenPlaceIdx(openPlaceIdx === idx ? null : idx)}
+                  >
+                    <ServiceHeader>
+                      <ServiceIcon className="park">
+                        <FaTree />
+                      </ServiceIcon>
+                      <ServiceName>{place.name}</ServiceName>
+                      <ServiceType>{place.type}</ServiceType>
+                    </ServiceHeader>
+                    <ServiceAddress>
+                      <FaMapMarkerAlt />
+                      {place.address}
+                    </ServiceAddress>
+                  </ServiceCard>
+                  {openPlaceIdx === idx && place.lat && place.lon && (
+                    <div style={{ margin: '20px 0' }}>
+                      <ParkingMap parkingData={[{
+                        name: place.name,
+                        address: place.address,
+                        coordinates: { lat: place.lat, lon: place.lon }
+                      }]} />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </ServicesGrid>
+          )}
+        </div>
       )}
 
       {activeTab === 'tips' && (

@@ -1,108 +1,58 @@
 const express = require('express');
 const router = express.Router();
+const fs = require('fs');
+const path = require('path');
+const csv = require('csv-parser');
 
-// 강원도 주차장 정보 (샘플 데이터)
-const PARKING_DATA = [
-  {
-    id: 1,
-    name: '춘천시청 주차장',
-    address: '강원도 춘천시 중앙로 112',
-    type: '공영',
-    totalSpaces: 150,
-    availableSpaces: 45,
-    operatingHours: '06:00 - 22:00',
-    fee: '30분당 500원',
-    coordinates: { lat: 37.8813, lon: 127.7298 },
-    amenities: ['장애인 주차장', '전기차 충전소'],
-    phone: '033-250-3000'
-  },
-  {
-    id: 2,
-    name: '강릉시외버스터미널 주차장',
-    address: '강원도 강릉시 경강로 2105',
-    type: '공영',
-    totalSpaces: 200,
-    availableSpaces: 78,
-    operatingHours: '24시간',
-    fee: '30분당 400원',
-    coordinates: { lat: 37.7519, lon: 128.8761 },
-    amenities: ['장애인 주차장'],
-    phone: '033-651-2000'
-  },
-  {
-    id: 3,
-    name: '원주시 중앙시장 주차장',
-    address: '강원도 원주시 원일로 172',
-    type: '공영',
-    totalSpaces: 100,
-    availableSpaces: 23,
-    operatingHours: '07:00 - 21:00',
-    fee: '30분당 600원',
-    coordinates: { lat: 37.3444, lon: 127.9203 },
-    amenities: ['장애인 주차장'],
-    phone: '033-737-3000'
-  },
-  {
-    id: 4,
-    name: '속초시 중앙시장 주차장',
-    address: '강원도 속초시 중앙로 147',
-    type: '공영',
-    totalSpaces: 80,
-    availableSpaces: 12,
-    operatingHours: '08:00 - 20:00',
-    fee: '30분당 700원',
-    coordinates: { lat: 38.2072, lon: 128.5918 },
-    amenities: ['장애인 주차장', '전기차 충전소'],
-    phone: '033-630-3000'
-  },
-  {
-    id: 5,
-    name: '동해시 해변공원 주차장',
-    address: '강원도 동해시 망상동 123-45',
-    type: '공영',
-    totalSpaces: 120,
-    availableSpaces: 67,
-    operatingHours: '06:00 - 23:00',
-    fee: '30분당 500원',
-    coordinates: { lat: 37.5236, lon: 129.1142 },
-    amenities: ['장애인 주차장'],
-    phone: '033-530-2000'
-  }
-];
 
-// 주차장 목록 조회
+// 주차장 목록 조회 (CSV 파일 기반)
 router.get('/', async (req, res) => {
   try {
-    const { city, type, available } = req.query;
-    
-    let filteredData = [...PARKING_DATA];
-    
-    // 도시별 필터링
-    if (city) {
-      filteredData = filteredData.filter(parking => 
-        parking.address.includes(city)
-      );
-    }
-    
-    // 주차장 유형별 필터링
-    if (type) {
-      filteredData = filteredData.filter(parking => 
-        parking.type === type
-      );
-    }
-    
-    // 주차 가능 여부 필터링
-    if (available === 'true') {
-      filteredData = filteredData.filter(parking => 
-        parking.availableSpaces > 0
-      );
-    }
-    
-    res.json({
-      success: true,
-      data: filteredData,
-      total: filteredData.length
-    });
+  const results = [];
+  const { city, type, keyword } = req.query;
+    const csvPath = path.join(__dirname, '../parking.csv');
+
+    fs.createReadStream(csvPath)
+      .pipe(csv())
+      .on('data', (data) => {
+  // 지역 필터 제거: 모든 주차장 표시
+        if (city && !data['주차장지번주소'].includes(city) && !data['주차장도로명주소'].includes(city)) return;
+        if (type && data['주차장구분'] !== type) return;
+        if (keyword) {
+          const lowerKeyword = keyword.toLowerCase();
+          const name = (data['주차장명'] || '').toLowerCase();
+          const address = ((data['주차장도로명주소'] || '') + (data['주차장지번주소'] || '')).toLowerCase();
+          if (!name.includes(lowerKeyword) && !address.includes(lowerKeyword)) return;
+        }
+        results.push({
+          id: data['주차장관리번호'],
+          name: data['주차장명'],
+          address: data['주차장도로명주소'] || data['주차장지번주소'],
+          type: data['주차장구분'],
+          lotType: data['주차장유형'],
+          totalSpaces: data['주차구획수'],
+          fee: data['요금정보'],
+          coordinates: {
+            lat: parseFloat(data['위도']),
+            lon: parseFloat(data['경도'])
+          },
+          phone: data['연락처']
+        });
+      })
+      .on('end', () => {
+        res.json({
+          success: true,
+          data: results,
+          total: results.length
+        });
+      })
+      .on('error', (error) => {
+        console.error('CSV 읽기 오류:', error);
+        res.status(500).json({
+          success: false,
+          error: '주차장 정보를 가져오는 중 오류가 발생했습니다.'
+        });
+      });
   } catch (error) {
     console.error('주차장 정보 조회 오류:', error);
     res.status(500).json({
@@ -149,19 +99,57 @@ router.get('/:id', async (req, res) => {
 router.get('/search/:keyword', async (req, res) => {
   try {
     const { keyword } = req.params;
-    
-    const searchResults = PARKING_DATA.filter(parking =>
-      parking.name.includes(keyword) ||
-      parking.address.includes(keyword) ||
-      parking.amenities.some(amenity => amenity.includes(keyword))
-    );
-    
-    res.json({
-      success: true,
-      keyword,
-      data: searchResults,
-      total: searchResults.length
-    });
+    const results = [];
+    const csvPath = path.join(__dirname, '../parking.csv');
+    const search = keyword.trim().toLowerCase();
+
+    fs.createReadStream(csvPath)
+      .pipe(csv())
+      .on('data', (data) => {
+        // 강원도 지역만 필터링
+        const isGangwon = (data['주차장지번주소'] && data['주차장지번주소'].includes('강원도')) ||
+                          (data['주차장도로명주소'] && data['주차장도로명주소'].includes('강원도'));
+        if (!isGangwon) return;
+        // 검색어가 주차장명 또는 주소에 포함되어 있으면 결과에 추가 (소문자, 공백 제거)
+        const name = (data['주차장명'] || '').toLowerCase();
+        const roadAddr = (data['주차장도로명주소'] || '').toLowerCase();
+        const jibunAddr = (data['주차장지번주소'] || '').toLowerCase();
+        if (
+          name.includes(search) ||
+          roadAddr.includes(search) ||
+          jibunAddr.includes(search)
+        ) {
+          results.push({
+            id: data['주차장관리번호'],
+            name: data['주차장명'],
+            address: data['주차장도로명주소'] || data['주차장지번주소'],
+            type: data['주차장구분'],
+            lotType: data['주차장유형'],
+            totalSpaces: data['주차구획수'],
+            fee: data['요금정보'],
+            coordinates: {
+              lat: parseFloat(data['위도']),
+              lon: parseFloat(data['경도'])
+            },
+            phone: data['연락처']
+          });
+        }
+      })
+      .on('end', () => {
+        res.json({
+          success: true,
+          keyword,
+          data: results,
+          total: results.length
+        });
+      })
+      .on('error', (error) => {
+        console.error('CSV 검색 오류:', error);
+        res.status(500).json({
+          success: false,
+          error: '주차장 검색 중 오류가 발생했습니다.'
+        });
+      });
   } catch (error) {
     console.error('주차장 검색 오류:', error);
     res.status(500).json({
@@ -174,25 +162,46 @@ router.get('/search/:keyword', async (req, res) => {
 // 주차장 통계 정보
 router.get('/stats/summary', async (req, res) => {
   try {
-    const totalSpaces = PARKING_DATA.reduce((sum, parking) => sum + parking.totalSpaces, 0);
-    const totalAvailable = PARKING_DATA.reduce((sum, parking) => sum + parking.availableSpaces, 0);
-    const occupancyRate = Math.round(((totalSpaces - totalAvailable) / totalSpaces) * 100);
-    
-    const typeStats = PARKING_DATA.reduce((stats, parking) => {
-      stats[parking.type] = (stats[parking.type] || 0) + 1;
-      return stats;
-    }, {});
-    
-    res.json({
-      success: true,
-      stats: {
-        totalParkingLots: PARKING_DATA.length,
-        totalSpaces,
-        totalAvailable,
-        occupancyRate: `${occupancyRate}%`,
-        byType: typeStats
-      }
-    });
+    const csvPath = path.join(__dirname, '../parking.csv');
+    const results = [];
+    fs.createReadStream(csvPath)
+      .pipe(csv())
+      .on('data', (data) => {
+        results.push({
+          type: data['주차장구분'],
+          totalSpaces: parseInt(data['주차구획수']) || 0,
+          availableSpaces: parseInt(data['주차구획수']) || 0 // 실제 available 정보 없으면 total로 대체
+        });
+      })
+      .on('end', () => {
+        const totalParkingLots = results.length;
+        const totalSpaces = results.reduce((sum, p) => sum + p.totalSpaces, 0);
+        const totalAvailable = results.reduce((sum, p) => sum + p.availableSpaces, 0);
+        const occupancyRate = totalSpaces === 0 ? 0 : Math.round(((totalSpaces - totalAvailable) / totalSpaces) * 100);
+
+        const typeStats = results.reduce((stats, p) => {
+          stats[p.type] = (stats[p.type] || 0) + 1;
+          return stats;
+        }, {});
+
+        res.json({
+          success: true,
+          stats: {
+            totalParkingLots,
+            totalSpaces,
+            totalAvailable,
+            occupancyRate: `${occupancyRate}%`,
+            byType: typeStats
+          }
+        });
+      })
+      .on('error', (error) => {
+        console.error('주차장 통계 조회 오류:', error);
+        res.status(500).json({
+          success: false,
+          error: '주차장 통계를 가져오는 중 오류가 발생했습니다.'
+        });
+      });
   } catch (error) {
     console.error('주차장 통계 조회 오류:', error);
     res.status(500).json({

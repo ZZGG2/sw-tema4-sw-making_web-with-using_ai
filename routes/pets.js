@@ -1,102 +1,39 @@
+
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
+const csv = require('csv-parser');
 const router = express.Router();
 
-// 강원도 반려동물 관련 정보 (샘플 데이터)
-const PET_SERVICES = [
-  {
-    id: 1,
-    name: '춘천동물병원',
-    type: '동물병원',
-    address: '강원도 춘천시 중앙로 123',
-    phone: '033-252-1234',
-    services: ['진료', '예방접종', '수술', '미용'],
-    operatingHours: '09:00 - 19:00',
-    coordinates: { lat: 37.8813, lon: 127.7298 },
-    rating: 4.5,
-    reviews: 23
-  },
-  {
-    id: 2,
-    name: '강릉펫케어센터',
-    type: '펫샵',
-    address: '강원도 강릉시 경강로 456',
-    phone: '033-654-5678',
-    services: ['미용', '목욕', '호텔', '용품판매'],
-    operatingHours: '10:00 - 20:00',
-    coordinates: { lat: 37.7519, lon: 128.8761 },
-    rating: 4.2,
-    reviews: 18
-  },
-  {
-    id: 3,
-    name: '원주애완동물약국',
-    type: '동물약국',
-    address: '강원도 원주시 원일로 789',
-    phone: '033-742-9012',
-    services: ['약품판매', '상담', '건강검진'],
-    operatingHours: '09:00 - 18:00',
-    coordinates: { lat: 37.3444, lon: 127.9203 },
-    rating: 4.7,
-    reviews: 31
-  },
-  {
-    id: 4,
-    name: '속초펫파크',
-    type: '펫파크',
-    address: '강원도 속초시 중앙로 321',
-    phone: '033-638-3456',
-    services: ['산책', '놀이', '교육', '카페'],
-    operatingHours: '08:00 - 21:00',
-    coordinates: { lat: 38.2072, lon: 128.5918 },
-    rating: 4.8,
-    reviews: 45
-  },
-  {
-    id: 5,
-    name: '동해동물보호소',
-    type: '보호소',
-    address: '강원도 동해시 망상동 654',
-    phone: '033-532-7890',
-    services: ['입양', '보호', '중성화', '교육'],
-    operatingHours: '09:00 - 17:00',
-    coordinates: { lat: 37.5236, lon: 129.1142 },
-    rating: 4.6,
-    reviews: 67
-  }
-];
-
-const PET_FRIENDLY_PLACES = [
-  {
-    id: 1,
-    name: '춘천남이섬',
-    type: '관광지',
-    address: '강원도 춘천시 남산면 남이섬길 1',
-    description: '반려동물과 함께 즐길 수 있는 자연 경관',
-    petPolicy: '리드줄 착용 필수',
-    coordinates: { lat: 37.7900, lon: 127.5258 },
-    rating: 4.3
-  },
-  {
-    id: 2,
-    name: '강릉커피거리',
-    type: '카페거리',
-    address: '강원도 강릉시 경강로 2105',
-    description: '반려동물 동반 가능한 카페들이 모인 거리',
-    petPolicy: '소형견 동반 가능',
-    coordinates: { lat: 37.7519, lon: 128.8761 },
-    rating: 4.4
-  },
-  {
-    id: 3,
-    name: '속초해변',
-    type: '해변',
-    address: '강원도 속초시 조양동',
-    description: '반려동물과 함께 바다를 즐길 수 있는 해변',
-    petPolicy: '특정 구역에서만 가능',
-    coordinates: { lat: 38.2072, lon: 128.5918 },
-    rating: 4.5
-  }
-];
+// pet_friendly.csv 파싱 함수
+function readPetFriendlyCSV(keyword) {
+  return new Promise((resolve, reject) => {
+    const results = [];
+    fs.createReadStream(path.join(__dirname, '../pet_friendly.csv'))
+      .pipe(csv())
+      .on('data', (row) => {
+        // 검색어가 있으면 이름/주소/지역에 포함되는 것만
+        if (!keyword ||
+          row['장소']?.includes(keyword) ||
+          row['주소']?.includes(keyword) ||
+          row['지역']?.includes(keyword)
+        ) {
+          results.push({
+            id: row['번호'],
+            name: row['장소'],
+            city: row['지역'],
+            address: row['주소'],
+            type: row['구분'],
+            lat: parseFloat(row['위도']),
+            lon: parseFloat(row['경도']),
+            phone: row['전화번호']
+          });
+        }
+      })
+      .on('end', () => resolve(results))
+      .on('error', reject);
+  });
+}
 
 const PET_CARE_TIPS = [
   {
@@ -122,27 +59,23 @@ const PET_CARE_TIPS = [
   }
 ];
 
-// 반려동물 서비스 목록 조회
+// 반려동물 서비스 목록 조회 (CSV 기반)
 router.get('/services', async (req, res) => {
   try {
     const { type, city } = req.query;
-    
-    let filteredData = [...PET_SERVICES];
-    
+    // CSV 전체 읽기
+    let data = await readPetFriendlyCSV();
+    // type, city 필터 적용
     if (type) {
-      filteredData = filteredData.filter(service => service.type === type);
+      data = data.filter(service => service.type === type);
     }
-    
     if (city) {
-      filteredData = filteredData.filter(service => 
-        service.address.includes(city)
-      );
+      data = data.filter(service => service.city && service.city.includes(city));
     }
-    
     res.json({
       success: true,
-      data: filteredData,
-      total: filteredData.length
+      data,
+      total: data.length
     });
   } catch (error) {
     console.error('반려동물 서비스 조회 오류:', error);
@@ -153,21 +86,15 @@ router.get('/services', async (req, res) => {
   }
 });
 
-// 반려동물 동반 가능 장소 조회
+// 반려동물 동반 가능 장소 조회 (검색어 기반)
 router.get('/places', async (req, res) => {
   try {
-    const { type } = req.query;
-    
-    let filteredData = [...PET_FRIENDLY_PLACES];
-    
-    if (type) {
-      filteredData = filteredData.filter(place => place.type === type);
-    }
-    
+    const { keyword } = req.query;
+    const data = await readPetFriendlyCSV(keyword);
     res.json({
       success: true,
-      data: filteredData,
-      total: filteredData.length
+      data,
+      total: data.length
     });
   } catch (error) {
     console.error('반려동물 동반 장소 조회 오류:', error);

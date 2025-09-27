@@ -153,7 +153,7 @@ const BusinessCard = styled.div`
   padding: 20px;
   backdrop-filter: blur(10px);
   transition: all 0.2s ease;
-  border-left: 4px solid ${props => props.verified ? '#00b894' : '#e0e0e0'};
+  border-left: 4px solid ${props => props.$verified ? '#00b894' : '#e0e0e0'};
   
   &:hover {
     transform: translateY(-2px);
@@ -335,9 +335,9 @@ function Businesses() {
   const [businessesData, setBusinessesData] = useState([]);
   const [topRatedData, setTopRatedData] = useState([]);
   const [stats, setStats] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  
+  const [showList, setShowList] = useState(false);
   const [filters, setFilters] = useState({
     category: '',
     city: '',
@@ -345,11 +345,11 @@ function Businesses() {
   });
   const [searchKeyword, setSearchKeyword] = useState('');
 
-  useEffect(() => {
-    fetchBusinessesData();
-    fetchTopRatedData();
-    fetchStats();
-  }, []);
+  // useEffect(() => {
+  //   fetchBusinessesData();
+  //   fetchTopRatedData();
+  //   fetchStats();
+  // }, []);
 
   const fetchBusinessesData = async (params = {}) => {
     try {
@@ -405,19 +405,32 @@ function Businesses() {
   const handleFilterChange = (filterType, value) => {
     const newFilters = { ...filters, [filterType]: value };
     setFilters(newFilters);
-    fetchBusinessesData(newFilters);
+    // 필터만 바꿔도 바로 fetch하지 않고, 검색 버튼/엔터로만 리스트 노출
+    setShowList(false);
+    setBusinessesData([]);
   };
 
   const handleSearch = async () => {
-    if (!searchKeyword.trim()) return;
-    
+    setLoading(true);
+    setShowList(false);
     try {
-      setLoading(true);
-      const response = await fetch(`/api/businesses/search/${encodeURIComponent(searchKeyword)}`);
-      const data = await response.json();
-      
+      let data;
+      if (searchKeyword.trim()) {
+        // 검색어가 있으면 키워드+필터로 검색
+        const response = await fetch(`/api/businesses/search/${encodeURIComponent(searchKeyword)}`);
+        data = await response.json();
+      } else {
+        // 검색어 없으면 필터만으로 fetch
+        const queryParams = new URLSearchParams();
+        if (filters.category) queryParams.append('category', filters.category);
+        if (filters.city) queryParams.append('city', filters.city);
+        if (filters.verified) queryParams.append('verified', filters.verified);
+        const response = await fetch(`/api/businesses?${queryParams}`);
+        data = await response.json();
+      }
       if (data.success) {
         setBusinessesData(data.data);
+        setShowList(true);
       } else {
         throw new Error(data.error || '검색 결과를 찾을 수 없습니다.');
       }
@@ -450,22 +463,13 @@ function Businesses() {
     }
   };
 
-  if (loading && !businessesData.length) {
-    return (
-      <BusinessesContainer>
-        <PageTitle>강원도 착한업소</PageTitle>
-        <Loading>착한업소 정보를 불러오는 중...</Loading>
-      </BusinessesContainer>
-    );
-  }
+  // 검색 전에는 검색창만, 검색 시에만 리스트 노출
 
   return (
     <BusinessesContainer>
       <PageTitle>강원도 착한업소</PageTitle>
-      
       <SearchSection>
         <SearchTitle>착한업소 검색 및 필터</SearchTitle>
-        
         <FilterContainer>
           <FilterSelect
             value={filters.category}
@@ -480,7 +484,6 @@ function Businesses() {
             <option value="협동조합">협동조합</option>
             <option value="자원봉사단체">자원봉사단체</option>
           </FilterSelect>
-          
           <FilterSelect
             value={filters.city}
             onChange={(e) => handleFilterChange('city', e.target.value)}
@@ -493,7 +496,6 @@ function Businesses() {
             <option value="동해">동해</option>
             <option value="태백">태백</option>
           </FilterSelect>
-          
           <FilterSelect
             value={filters.verified}
             onChange={(e) => handleFilterChange('verified', e.target.value)}
@@ -502,158 +504,71 @@ function Businesses() {
             <option value="true">인증업소만</option>
           </FilterSelect>
         </FilterContainer>
-        
         <SearchContainer>
           <SearchInput
             type="text"
             placeholder="업소명, 주소, 서비스를 입력하세요"
             value={searchKeyword}
             onChange={(e) => setSearchKeyword(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+            onKeyPress={(e) => {
+              if (e.key === 'Enter') handleSearch();
+            }}
           />
-          <SearchButton onClick={handleSearch}>
+          <SearchButton
+            onClick={handleSearch}
+          >
             <FaSearch />
             검색
           </SearchButton>
         </SearchContainer>
       </SearchSection>
-
-      {stats && (
-        <StatsSection>
-          <StatCard>
-            <StatIcon>
-              <FaStore />
-            </StatIcon>
-            <StatNumber>{stats.totalBusinesses}</StatNumber>
-            <StatLabel>총 착한업소</StatLabel>
-          </StatCard>
-          <StatCard>
-            <StatIcon>
-              <FaCheckCircle />
-            </StatIcon>
-            <StatNumber>{stats.verifiedBusinesses}</StatNumber>
-            <StatLabel>인증업소</StatLabel>
-          </StatCard>
-          <StatCard>
-            <StatIcon>
-              <FaStar />
-            </StatIcon>
-            <StatNumber>{stats.averageRating}</StatNumber>
-            <StatLabel>평균 평점</StatLabel>
-          </StatCard>
-          <StatCard>
-            <StatIcon>
-              <FaUsers />
-            </StatIcon>
-            <StatNumber>{stats.totalReviews}</StatNumber>
-            <StatLabel>총 리뷰</StatLabel>
-          </StatCard>
-        </StatsSection>
-      )}
-
-      {topRatedData.length > 0 && (
-        <TopRatedSection>
-          <SectionTitle>
-            <FaCrown />
-            인기 착한업소
-          </SectionTitle>
-          <BusinessesGrid>
-            {topRatedData.map((business) => (
-              <BusinessCard key={business.id} verified={business.verified}>
-                <BusinessHeader>
-                  <BusinessIcon className={getBusinessIconClass(business.category)}>
-                    {getBusinessIcon(business.category)}
-                  </BusinessIcon>
-                  <BusinessName>{business.name}</BusinessName>
-                  <BusinessCategory>{business.category}</BusinessCategory>
-                  {business.verified && (
-                    <VerifiedBadge>
-                      <FaCheckCircle />
-                      인증
-                    </VerifiedBadge>
-                  )}
-                </BusinessHeader>
-                
-                <BusinessAddress>
-                  <FaMapMarkerAlt />
-                  {business.address}
-                </BusinessAddress>
-                
-                <BusinessDescription>{business.description}</BusinessDescription>
-                
-                <Rating>
-                  <div>
-                    <FaStar style={{ color: '#ffd700' }} />
-                    {business.rating} ({business.reviews}개 리뷰)
-                  </div>
-                </Rating>
-              </BusinessCard>
-            ))}
-          </BusinessesGrid>
-        </TopRatedSection>
-      )}
-
-      {error && <Error>{error}</Error>}
-
-      <BusinessesGrid>
-        {businessesData.map((business) => (
-          <BusinessCard key={business.id} verified={business.verified}>
-            <BusinessHeader>
-              <BusinessIcon className={getBusinessIconClass(business.category)}>
-                {getBusinessIcon(business.category)}
-              </BusinessIcon>
-              <BusinessName>{business.name}</BusinessName>
-              <BusinessCategory>{business.category}</BusinessCategory>
-              {business.verified && (
-                <VerifiedBadge>
-                  <FaCheckCircle />
-                  인증
-                </VerifiedBadge>
-              )}
-            </BusinessHeader>
-            
-            <BusinessAddress>
-              <FaMapMarkerAlt />
-              {business.address}
-            </BusinessAddress>
-            
-            <BusinessInfo>
-              <InfoItem>
-                <FaClock />
-                {business.operatingHours}
-              </InfoItem>
-              <InfoItem>
-                <FaPhone />
-                {business.phone}
-              </InfoItem>
-            </BusinessInfo>
-            
-            <BusinessDescription>{business.description}</BusinessDescription>
-            
-            <Services>
-              {business.services.map((service, index) => (
-                <ServiceTag key={index}>{service}</ServiceTag>
-              ))}
-            </Services>
-            
-            <GoodDeeds>
-              {business.goodDeeds.map((deed, index) => (
-                <GoodDeedTag key={index}>
-                  <FaHeart />
-                  {deed}
-                </GoodDeedTag>
-              ))}
-            </GoodDeeds>
-            
-            <Rating>
-              <div>
-                <FaStar style={{ color: '#ffd700' }} />
-                {business.rating} ({business.reviews}개 리뷰)
+      {/* 검색 시에만 리스트/카드/네이버 지도 노출 */}
+      {showList && (
+        <BusinessesGrid>
+          {businessesData.map((business) => (
+            <BusinessCard key={business.id}>
+              <BusinessHeader>
+                <BusinessIcon>
+                  <FaStore />
+                </BusinessIcon>
+                <BusinessName>{business.name}</BusinessName>
+                <BusinessCategory>{business.category}</BusinessCategory>
+              </BusinessHeader>
+              <BusinessAddress>
+                <FaMapMarkerAlt />
+                {business.address}
+              </BusinessAddress>
+              <BusinessInfo>
+                <InfoItem>
+                  <FaPhone />
+                  {business.phone}
+                </InfoItem>
+              </BusinessInfo>
+              <div style={{ marginTop: '12px', textAlign: 'right' }}>
+                <a
+                  href={`https://map.naver.com/v5/search/${encodeURIComponent(business.address)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: 'inline-block',
+                    background: 'linear-gradient(135deg, #03c75a 0%, #00b894 100%)',
+                    color: 'white',
+                    padding: '8px 16px',
+                    borderRadius: '6px',
+                    fontWeight: 600,
+                    textDecoration: 'none',
+                    fontSize: '15px',
+                    boxShadow: '0 2px 8px rgba(3,199,90,0.15)'
+                  }}
+                >
+                  네이버 지도에서 보기
+                </a>
               </div>
-            </Rating>
-          </BusinessCard>
-        ))}
-      </BusinessesGrid>
+            </BusinessCard>
+          ))}
+        </BusinessesGrid>
+      )}
+      {error && <Error>{error}</Error>}
     </BusinessesContainer>
   );
 }
