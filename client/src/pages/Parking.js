@@ -12,6 +12,7 @@ import {
   FaFilter,
   FaInfoCircle
 } from 'react-icons/fa';
+import DebugOpenStatus from './DebugOpenStatus';
 
 const ParkingContainer = styled.div`
   max-width: 1200px;
@@ -261,44 +262,75 @@ const ErrorDiv = styled.div`
 `;
 
 function Parking() {
-  // 검색 버튼 및 Enter 키 이벤트 핸들러
+  // 주차장 영업중 여부 판단 함수 (운영요일+운영시간)
+  function isParkingOpen(parking) {
+    if (!parking) return false;
+    // 운영요일 필드명: '운영요일' 또는 'operatingDays' 모두 지원
+    let daysStr = parking['운영요일'] || parking.operatingDays;
+    if (typeof daysStr === 'string') daysStr = daysStr.trim();
+    if (!daysStr) {
+      // 운영요일 정보가 없으면 영업중으로 간주
+      return true;
+    }
+    // 오늘 요일(0:일~6:토)
+    const today = new Date();
+    const dayIdx = today.getDay();
+    if (daysStr === '평일') {
+      return [1,2,3,4,5].includes(dayIdx);
+    } else if (daysStr === '평일+토요일') {
+      return [1,2,3,4,5,6].includes(dayIdx);
+    } else if (daysStr === '평일+공휴일') {
+      return [1,2,3,4,5,0].includes(dayIdx);
+    } else if (daysStr === '평일+토요일+공휴일') {
+      return [1,2,3,4,5,6,0].includes(dayIdx);
+    }
+    // 위 if/else문에 없는 문자열은 모두 영업중 아님
+    console.warn('지원하지 않는 운영요일:', parking.name, daysStr);
+    return false;
+  }
+  // 통계 데이터 상태 선언
+  const [stats, setStats] = useState(null);
+  // 주차장 데이터 상태 선언
+  const [parkingData, setParkingData] = useState([]);
+  // 에러 상태 선언
+  const [error, setError] = useState(null);
+  // 로딩 상태 선언
+  const [loading, setLoading] = useState(false);
+  // 주차장 리스트 표시 여부 상태 선언
+  const [showList, setShowList] = useState(false);
+  // 검색어 상태 선언
+  const [searchKeyword, setSearchKeyword] = useState('');
+  // 필터 상태 선언 (도시, 유형, 영업중)
+  const [filters, setFilters] = useState({
+    city: '',
+    type: '',
+    openNow: false
+  });
+
   // 검색 버튼 및 Enter 키 이벤트 핸들러
   const handleSearch = () => {
     fetchParkingData({ ...filters, keyword: searchKeyword });
     setShowList(true);
   };
+
   // 어떤 카드가 열려있는지 id로 관리
   const [openCardId, setOpenCardId] = useState(null);
-  const [showList, setShowList] = useState(false);
-  const [parkingData, setParkingData] = useState([]);
-  const [stats, setStats] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  
-  const [filters, setFilters] = useState({
-    city: '',
-    type: '',
-    available: ''
-  });
-  const [searchKeyword, setSearchKeyword] = useState('');
-
   useEffect(() => {
     fetchStats();
+    // 검색 전에는 리스트를 표시하지 않음
   }, []);
 
   const fetchParkingData = async (params = {}) => {
     try {
       setLoading(true);
       setError(null);
-      
       const queryParams = new URLSearchParams();
       if (params.city) queryParams.append('city', params.city);
       if (params.type) queryParams.append('type', params.type);
-      if (params.available) queryParams.append('available', params.available);
-      
+      if (params.keyword) queryParams.append('keyword', params.keyword);
+  // available(영업중) 파라미터는 프론트엔드에서만 필터링하므로 서버로 전달하지 않음
       const response = await fetch(`/api/parking?${queryParams}`);
       const data = await response.json();
-      
       if (data.success) {
         setParkingData(data.data);
       } else {
@@ -315,30 +347,25 @@ function Parking() {
     try {
       const response = await fetch('/api/parking/stats/summary');
       const data = await response.json();
-      
       if (data.success) {
         setStats(data.stats);
       }
     } catch (err) {
-      console.error('통계 정보 오류:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleFilterChange = (filterType, value) => {
-    const newFilters = { ...filters, [filterType]: value };
-    setFilters(newFilters);
-    fetchParkingData(newFilters);
-  }
-
   return (
     <ParkingContainer>
-      <PageTitle>강원도 주차장 정보</PageTitle>
+      <PageTitle>강원도 공영주차장 정보</PageTitle>
       <SearchSection>
         <SearchTitle>주차장 검색 및 필터</SearchTitle>
         <FilterContainer>
           <FilterSelect
             value={filters.city}
-            onChange={(e) => handleFilterChange('city', e.target.value)}
+            onChange={e => setFilters(f => ({ ...f, city: e.target.value }))}
           >
             <option value="">전체 도시</option>
             <option value="춘천">춘천</option>
@@ -349,135 +376,104 @@ function Parking() {
           </FilterSelect>
           <FilterSelect
             value={filters.type}
-            onChange={(e) => handleFilterChange('type', e.target.value)}
+            onChange={e => setFilters(f => ({ ...f, type: e.target.value }))}
           >
             <option value="">전체 유형</option>
-            <option value="공영">공영</option>
-            <option value="민영">민영</option>
+            <option value="노외">노외</option>
+            <option value="노상">노상</option>
           </FilterSelect>
-          <FilterSelect
-            value={filters.available}
-            onChange={(e) => handleFilterChange('available', e.target.value)}
-          >
-            <option value="">전체</option>
-            <option value="true">주차 가능</option>
-          </FilterSelect>
+          {/* 영업중 필터 체크박스 */}
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={filters.openNow}
+              onChange={e => setFilters(f => ({ ...f, openNow: e.target.checked }))}
+            />
+            영업중
+          </label>
         </FilterContainer>
         <SearchContainer>
           <SearchInput
             type="text"
-            placeholder="주차장명 또는 주소를 입력하세요"
+            placeholder="주차장명, 주소, 지역명 등 입력"
             value={searchKeyword}
-            onChange={(e) => setSearchKeyword(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+            onChange={e => setSearchKeyword(e.target.value)}
+            onKeyPress={e => { if (e.key === 'Enter') handleSearch(); }}
           />
           <SearchButton onClick={handleSearch}>
-            <FaSearch />
-            검색
+            <FaSearch /> 검색
           </SearchButton>
         </SearchContainer>
       </SearchSection>
-      {/* 지도와 에러 메시지 영역을 검색 결과 아래에 위치 */}
-      {error && <ErrorDiv>{error}</ErrorDiv>}
-      {/* 검색 후에만 리스트 렌더링 */}
-      {showList && parkingData.length > 0 && (
-        <ParkingGrid>
-          {parkingData.map((parking, idx) => (
-            <div key={parking.id || idx}>
-              <ParkingCard
-                style={{ cursor: 'pointer' }}
-                onClick={() => setOpenCardId(openCardId === idx ? null : idx)}
-              >
-                <ParkingHeader>
-                  <ParkingName>{parking.name}</ParkingName>
-                  <ParkingType>{parking.type}</ParkingType>
-                </ParkingHeader>
-                <ParkingAddress>
-                  <FaMapMarkerAlt />
-                  {parking.address}
-                </ParkingAddress>
-                <ParkingInfo>
-                  <InfoItem>
-                    <FaClock />
-                    {parking.operatingHours}
-                  </InfoItem>
-                  <InfoItem>
-                    <FaPhone />
-                    {parking.phone}
-                  </InfoItem>
-                  <InfoItem>
-                    <FaParking />
-                    {parking.fee}
-                  </InfoItem>
-                  <InfoItem>
-                    <FaInfoCircle />
-                    {parking.availableSpaces}/{parking.totalSpaces} 공간
-                  </InfoItem>
-                </ParkingInfo>
-                <AvailabilityBar>
-                  <AvailabilityFill
-                    available={parking.availableSpaces}
-                    total={parking.totalSpaces}
-                  />
-                </AvailabilityBar>
-                <AvailabilityText>
-                  {parking.availableSpaces}개 공간 사용 가능
-                </AvailabilityText>
-                <Amenities>
-                  {(parking.amenities || []).map((amenity, index) => (
-                    <Amenity key={index}>
-                      {amenity.includes('장애인') ? <FaWheelchair /> : null}
-                      {amenity.includes('전기차') ? <FaChargingStation /> : null}
-                      {amenity}
-                    </Amenity>
-                  ))}
-                </Amenities>
-              </ParkingCard>
-              {/* 카드가 열려있을 때만 지도 표시 */}
-              {openCardId === idx && (
-                <div style={{ margin: '20px 0' }}>
-                  <ParkingMap parkingData={[parking]} />
-                </div>
-              )}
+      {showList && (
+        <>
+          <DebugOpenStatus parkingData={parkingData} isParkingOpen={isParkingOpen} />
+          {parkingData.length > 0 ? (
+            <ParkingGrid>
+              {parkingData
+                .filter(parking => !filters.openNow || isParkingOpen(parking))
+                .map((parking, idx) => (
+                  <div key={parking.id || idx}>
+                    <ParkingCard onClick={() => setOpenCardId(openCardId === idx ? null : idx)}>
+                      <ParkingHeader>
+                        <FaParking style={{ fontSize: 22, color: '#667eea' }} />
+                        <ParkingName>{parking.name}</ParkingName>
+                        <ParkingType>{parking.type}</ParkingType>
+                        {/* 영업중 뱃지 */}
+                        {isParkingOpen(parking) && (
+                          <span style={{ background: '#00b894', color: 'white', borderRadius: 6, padding: '2px 10px', fontSize: 13, fontWeight: 600, marginLeft: 8 }}>
+                            영업중
+                          </span>
+                        )}
+                      </ParkingHeader>
+                      <ParkingAddress>
+                        <FaMapMarkerAlt />
+                        {parking.address}
+                      </ParkingAddress>
+                      <ParkingInfo>
+                        <InfoItem>
+                          <FaPhone />
+                          {parking.phone}
+                        </InfoItem>
+                        <InfoItem>
+                          <FaClock />
+                          {parking.operatingHours}
+                        </InfoItem>
+                      </ParkingInfo>
+                      <AvailabilityBar total={parking.totalSpaces} available={parking.availableSpaces}>
+                        <AvailabilityFill total={parking.totalSpaces} available={parking.availableSpaces} />
+                      </AvailabilityBar>
+                      <AvailabilityText>
+                        {parking.availableSpaces}개 공간 사용 가능
+                      </AvailabilityText>
+                      <Amenities>
+                        {(parking.amenities || []).map((amenity, index) => (
+                          <Amenity key={index}>
+                            {amenity.includes('장애인') ? <FaWheelchair /> : null}
+                            {amenity.includes('전기차') ? <FaChargingStation /> : null}
+                            {amenity}
+                          </Amenity>
+                        ))}
+                      </Amenities>
+                    </ParkingCard>
+                    {/* 카드가 열려있을 때만 지도 표시 */}
+                    {openCardId === idx && (
+                      <div style={{ margin: '20px 0' }}>
+                        <ParkingMap parkingData={[parking]} />
+                      </div>
+                    )}
+                  </div>
+                ))}
+            </ParkingGrid>
+          ) : (
+            <div style={{ textAlign: 'center', color: '#666', margin: '40px 0' }}>
+              검색 결과가 없습니다.
             </div>
-          ))}
-        </ParkingGrid>
+          )
+        }
+        </>
       )}
-
-      {stats && (
-        <StatsSection>
-          <StatCard>
-            <StatIcon>
-              <FaParking />
-            </StatIcon>
-            <StatNumber>{stats.totalParkingLots}</StatNumber>
-            <StatLabel>총 주차장</StatLabel>
-          </StatCard>
-          <StatCard>
-            <StatIcon>
-              <FaInfoCircle />
-            </StatIcon>
-            <StatNumber>{stats.totalSpaces}</StatNumber>
-            <StatLabel>총 주차공간</StatLabel>
-          </StatCard>
-          <StatCard>
-            <StatIcon>
-              <FaFilter />
-            </StatIcon>
-            <StatNumber>{stats.totalAvailable}</StatNumber>
-            <StatLabel>사용 가능</StatLabel>
-          </StatCard>
-          <StatCard>
-            <StatIcon>
-              <FaClock />
-            </StatIcon>
-            <StatNumber>{stats.occupancyRate}</StatNumber>
-            <StatLabel>점유율</StatLabel>
-          </StatCard>
-        </StatsSection>
-      )}
-
-  </ParkingContainer>
+    </ParkingContainer>
   );
 }
 
